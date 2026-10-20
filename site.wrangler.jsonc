@@ -1,0 +1,7 @@
+// Статический сайт Коморы (Cloudflare Workers static assets). Выкладка: ./deploy-site.sh
+{
+  "name": "komora",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "assets": { "directory": ".site-dist" }
+}
