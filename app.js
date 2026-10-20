@@ -1,18 +1,30 @@
 'use strict';
 
-const VERSION = '0.3';
+const VERSION = '0.4';
 const KEY = 'komora-v1';
+const SYNC_KEY = 'komora-sync';
+const API = 'https://komora-sync.SUBDOMAIN.workers.dev';
 const places = ['Холодильник', 'Морозилка', 'Крупы и шкаф', 'Специи', 'Другое'];
 const units = ['шт', 'г', 'кг', 'мл', 'л', 'уп.'];
 
 // ---------- state ----------
 
+// Every record carries updatedAt; deletions are kept as tombstones in `deleted` so they sync too.
+// Data from v0.3 and older has no timestamps: stamp it as "very old" so any real change wins over it.
+function normalize(s) {
+  if (!s || !Array.isArray(s.items) || !Array.isArray(s.shop)) s = { items: [], shop: [] };
+  if (!s.catalog || typeof s.catalog !== 'object') s.catalog = {};
+  if (!s.deleted || typeof s.deleted !== 'object') s.deleted = {};
+  for (let r of [...s.items, ...s.shop, ...Object.values(s.catalog)]) {
+    if (!Number.isFinite(r.updatedAt)) r.updatedAt = 1;
+  }
+  return { items: s.items, shop: s.shop, catalog: s.catalog, deleted: s.deleted };
+}
+
 function loadState() {
   let s;
   try { s = JSON.parse(localStorage.getItem(KEY)); } catch {}
-  if (!s || !Array.isArray(s.items) || !Array.isArray(s.shop)) s = { items: [], shop: [] };
-  if (!s.catalog || typeof s.catalog !== 'object') s.catalog = {};
-  return s;
+  return normalize(s);
 }
 
 let state = loadState();
@@ -24,10 +36,27 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const round = n => Math.round(n * 1000) / 1000;
 const plural = (n, one, few, many) => n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many;
 
-function save() {
+const touch = r => { r.updatedAt = Date.now(); return r; };
+
+// Drop records by predicate and remember them as deleted
+function remove(kind, pred) {
+  let t = Date.now();
+  state[kind] = state[kind].filter(r => {
+    if (!pred(r)) return true;
+    state.deleted[r.id] = t;
+    return false;
+  });
+}
+
+function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch { alert('Не удалось сохранить данные — память браузера переполнена или недоступна.'); }
   render();
+}
+
+function save() {
+  persist();
+  scheduleSync();
 }
 
 let toastTimer;
@@ -116,7 +145,7 @@ function render() {
     </div>`).join('') : '<div class="empty">🛒<p>Список покупок пуст.</p></div>';
   $('shopClearDone').classList.toggle('hidden', !state.shop.some(s => s.done));
 
-  $('subtitle').textContent = `${count} ${plural(count, 'позиция', 'позиции', 'позиций')} на складе`;
+  $('subtitle').textContent = `${count} ${plural(count, 'позиция', 'позиции', 'позиций')} на складе` + (sync.code ? ' · общий' : '');
 }
 
 $('tabs').onclick = e => {
@@ -246,13 +275,14 @@ $('form').onsubmit = e => {
     place: f.get('place'),
     expiry: f.get('expiry'),
     barcode: String(f.get('barcode')).trim(),
+    updatedAt: Date.now(),
   };
   if (!item.name || !Number.isFinite(item.qty) || item.qty < 0) return;
   let old = state.items.find(x => x.id === editing);
   if (item.barcode && (!state.catalog[item.barcode] || !old)) {
-    state.catalog[item.barcode] = { name: item.name, qty: item.qty, unit: item.unit, place: item.place };
+    state.catalog[item.barcode] = touch({ name: item.name, qty: item.qty, unit: item.unit, place: item.place });
   } else if (item.barcode) {
-    Object.assign(state.catalog[item.barcode], { name: item.name, unit: item.unit, place: item.place });
+    touch(Object.assign(state.catalog[item.barcode], { name: item.name, unit: item.unit, place: item.place }));
   }
   if (old) state.items = state.items.map(x => x.id === editing ? item : x);
   else state.items.push(item);
@@ -262,7 +292,7 @@ $('form').onsubmit = e => {
 
 $('deleteItem').onclick = () => {
   if (confirm('Удалить этот продукт?')) {
-    state.items = state.items.filter(x => x.id !== editing);
+    remove('items', x => x.id === editing);
     $('editor').close();
     save();
   }
@@ -296,10 +326,11 @@ $('consumeSave').onclick = () => {
   let i = state.items.find(x => x.id === consuming), q = Number($('consumeQty').value);
   if (!i || !Number.isFinite(q) || q <= 0 || q > i.qty) { alert('Укажи количество не больше остатка'); return; }
   i.qty = round(i.qty - q);
+  touch(i);
   $('consumeDialog').close();
   if (i.qty === 0) {
-    state.items = state.items.filter(x => x.id !== i.id);
-    if (confirm(`«${i.name}» закончился. Добавить в покупки?`)) state.shop.push({ id: uid(), name: i.name, done: false });
+    remove('items', x => x.id === i.id);
+    if (confirm(`«${i.name}» закончился. Добавить в покупки?`)) state.shop.push(touch({ id: uid(), name: i.name, done: false }));
   }
   save();
 };
@@ -320,6 +351,7 @@ $('foundBought').onclick = () => {
   if (!i) return;
   let pack = state.catalog[i.barcode]?.qty || 1;
   i.qty = round(i.qty + pack);
+  touch(i);
   $('foundDialog').close();
   save();
   toast(`${i.name}: теперь ${i.qty} ${i.unit}`);
@@ -344,7 +376,7 @@ document.querySelectorAll('[data-page]').forEach(b => b.onclick = () => {
 function addShop() {
   let n = $('shopInput').value.trim();
   if (!n) return;
-  state.shop.push({ id: uid(), name: n, done: false });
+  state.shop.push(touch({ id: uid(), name: n, done: false }));
   $('shopInput').value = '';
   save();
 }
@@ -353,13 +385,13 @@ $('shopInput').onkeydown = e => { if (e.key === 'Enter') addShop(); };
 $('shopList').onchange = e => {
   let id = e.target.dataset.check;
   let s = id && state.shop.find(x => x.id === id);
-  if (s) { s.done = e.target.checked; save(); }
+  if (s) { s.done = e.target.checked; touch(s); save(); }
 };
 $('shopList').onclick = e => {
   let id = e.target.dataset.remove;
-  if (id) { state.shop = state.shop.filter(x => x.id !== id); save(); }
+  if (id) { remove('shop', x => x.id === id); save(); }
 };
-$('shopClearDone').onclick = () => { state.shop = state.shop.filter(s => !s.done); save(); };
+$('shopClearDone').onclick = () => { remove('shop', s => s.done); save(); };
 
 // ---------- settings ----------
 
@@ -378,8 +410,15 @@ $('importFile').onchange = async e => {
   try {
     let obj = JSON.parse(await file.text());
     if (!Array.isArray(obj.items) || !Array.isArray(obj.shop)) throw Error();
-    if (confirm('Заменить текущие данные содержимым файла?')) {
-      state = { items: obj.items, shop: obj.shop, catalog: obj.catalog && typeof obj.catalog === 'object' ? obj.catalog : {} };
+    if (confirm('Заменить текущие данные содержимым файла?' + (sync.code ? ' На втором телефоне они тоже заменятся.' : ''))) {
+      // Imported records become the newest version; everything not in the file counts as deleted
+      let imported = normalize(obj);
+      [...imported.items, ...imported.shop, ...Object.values(imported.catalog)].forEach(touch);
+      let keep = new Set([...imported.items, ...imported.shop].map(r => r.id));
+      remove('items', r => !keep.has(r.id));
+      remove('shop', r => !keep.has(r.id));
+      for (let id of keep) delete state.deleted[id];
+      state = { items: imported.items, shop: imported.shop, catalog: { ...state.catalog, ...imported.catalog }, deleted: state.deleted };
       save();
     }
   } catch {
@@ -388,12 +427,198 @@ $('importFile').onchange = async e => {
   e.target.value = '';
 };
 $('clear').onclick = () => {
-  if (confirm('Удалить ВСЕ продукты и покупки? Это нельзя отменить.')) {
-    state = { items: [], shop: [], catalog: state.catalog };
+  if (confirm('Удалить ВСЕ продукты и покупки? Это нельзя отменить.' + (sync.code ? ' На втором телефоне они тоже удалятся.' : ''))) {
+    remove('items', () => true);
+    remove('shop', () => true);
     save();
   }
 };
 $('version').textContent = `Комора v${VERSION}`;
+
+// ---------- shared household sync ----------
+// The household is one JSON document on the server. Phones pull it, merge record by record
+// (newest updatedAt wins, tombstones beat older edits) and push back with the version they saw.
+
+const TOMBSTONE_TTL = 90 * 86400000;
+const dataOf = s => ({ items: s.items, shop: s.shop, catalog: s.catalog, deleted: s.deleted });
+
+function mergeData(a, b) {
+  a = normalize(structuredClone(a));
+  b = normalize(structuredClone(b));
+  let cutoff = Date.now() - TOMBSTONE_TTL, deleted = {};
+  for (let [id, t] of [...Object.entries(a.deleted), ...Object.entries(b.deleted)]) {
+    if (t > cutoff && !(deleted[id] >= t)) deleted[id] = t;
+  }
+  let list = (x, y) => {
+    let m = new Map();
+    for (let r of [...x, ...y]) {
+      let o = m.get(r.id);
+      if (!o || r.updatedAt > o.updatedAt) m.set(r.id, r);
+    }
+    return [...m.values()].filter(r => !(deleted[r.id] >= r.updatedAt));
+  };
+  let catalog = { ...a.catalog };
+  for (let [code, r] of Object.entries(b.catalog)) {
+    if (!catalog[code] || r.updatedAt > catalog[code].updatedAt) catalog[code] = r;
+  }
+  return { items: list(a.items, b.items), shop: list(a.shop, b.shop), catalog, deleted };
+}
+
+// Order-independent JSON, to tell whether a merge changed anything
+function stable(v) {
+  if (Array.isArray(v)) return '[' + [...v].sort((x, y) => String(x?.id).localeCompare(String(y?.id))).map(stable).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+
+let sync = { code: null, version: 0, lastSync: 0, error: null };
+try { Object.assign(sync, JSON.parse(localStorage.getItem(SYNC_KEY))); } catch {}
+const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch {} };
+
+const CODE_RE = /^[a-z2-7]{26}$/;
+const cleanCode = s => String(s || '').toLowerCase().replace(/[^a-z2-7]/g, '');
+const prettyCode = c => c.match(/.{1,4}/g).join('-');
+
+function newCode() {
+  let abc = 'abcdefghijklmnopqrstuvwxyz234567', bytes = crypto.getRandomValues(new Uint8Array(26));
+  return [...bytes].map(b => abc[b & 31]).join('');
+}
+
+async function api(method, code, body) {
+  let ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    return await fetch(`${API}/h/${code}`, {
+      method, cache: 'no-store', signal: ctrl.signal,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let syncing = false, syncAgain = false, syncTimer = null;
+
+function scheduleSync() {
+  if (!sync.code) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 1200);
+}
+
+async function syncNow() {
+  if (!sync.code) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  renderSync('Синхронизация…');
+  try {
+    let res = await api('GET', sync.code);
+    if (res.status === 404) throw Object.assign(Error(), { notFound: true });
+    if (!res.ok) throw Error('HTTP ' + res.status);
+    let remote = await res.json();
+    for (let attempt = 0; ; attempt++) {
+      let merged = mergeData(dataOf(state), remote.data);
+      let version = remote.version;
+      if (stable(merged) !== stable(remote.data)) {
+        res = await api('PUT', sync.code, { version, data: merged });
+        if (res.status === 409 && attempt < 4) { remote = await res.json(); continue; }
+        if (!res.ok) throw Error('HTTP ' + res.status);
+        version = (await res.json()).version;
+      }
+      // Edits made while we were waiting on the network get folded in and pushed on the next round
+      state = mergeData(dataOf(state), merged);
+      sync.version = version;
+      break;
+    }
+    sync.lastSync = Date.now();
+    sync.error = null;
+    persist();
+  } catch (e) {
+    sync.error = e.notFound ? 'Общий склад не найден на сервере.' : 'Нет связи с сервером — изменения отправятся позже.';
+  } finally {
+    syncing = false;
+    saveSync();
+    renderSync();
+    if (syncAgain) { syncAgain = false; syncNow(); }
+  }
+}
+
+function ago(t) {
+  let s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return 'только что';
+  if (s < 3600) return `${Math.floor(s / 60)} мин назад`;
+  if (s < 86400) return `${Math.floor(s / 3600)} ч назад`;
+  return new Date(t).toLocaleDateString('ru-RU');
+}
+
+function renderSync(busy) {
+  $('syncOff').classList.toggle('hidden', !!sync.code);
+  $('syncOn').classList.toggle('hidden', !sync.code);
+  if (!sync.code) return;
+  $('syncCode').textContent = prettyCode(sync.code);
+  $('syncStatus').textContent = busy || sync.error || (sync.lastSync ? `✓ Синхронизировано ${ago(sync.lastSync)}` : '');
+  $('syncStatus').classList.toggle('dangerbtn', !busy && !!sync.error);
+  render();
+}
+
+$('syncCreate').onclick = async () => {
+  let code = newCode();
+  $('syncCreate').disabled = true;
+  try {
+    let res = await api('PUT', code, { version: 0, data: mergeData(dataOf(state), dataOf(state)) });
+    if (!res.ok) throw Error();
+    Object.assign(sync, { code, version: (await res.json()).version, lastSync: Date.now(), error: null });
+    saveSync();
+    renderSync();
+    toast('Общий склад создан. Отправь код второму телефону.');
+  } catch {
+    alert('Не удалось связаться с сервером. Проверь интернет и попробуй ещё раз.');
+  } finally {
+    $('syncCreate').disabled = false;
+  }
+};
+
+$('syncJoin').onclick = async () => {
+  let code = cleanCode($('syncJoinCode').value);
+  if (!CODE_RE.test(code)) { alert('Код должен состоять из 26 букв и цифр — скопируй его целиком.'); return; }
+  $('syncJoin').disabled = true;
+  try {
+    let res = await api('GET', code);
+    if (res.status === 404) { alert('Склад с таким кодом не найден. Проверь код.'); return; }
+    if (!res.ok) throw Error();
+    let n = state.items.length + state.shop.length;
+    if (n && !confirm(`Продукты и покупки с этого телефона (${n}) добавятся в общий склад. Продолжить?`)) return;
+    Object.assign(sync, { code, version: 0, lastSync: 0, error: null });
+    saveSync();
+    $('syncJoinCode').value = '';
+    await syncNow();
+    if (!sync.error) toast('Подключено к общему складу');
+  } catch {
+    alert('Не удалось связаться с сервером. Проверь интернет и попробуй ещё раз.');
+  } finally {
+    $('syncJoin').disabled = false;
+  }
+};
+
+$('syncShare').onclick = async () => {
+  let text = `Код общего склада в Коморе: ${prettyCode(sync.code)}\nОткрой Комору → Настройки → «Подключиться» и вставь код.\n${new URL('./', location.href).href}`;
+  try {
+    if (navigator.share) await navigator.share({ text });
+    else { await navigator.clipboard.writeText(text); toast('Код скопирован'); }
+  } catch {}
+};
+$('syncNow').onclick = syncNow;
+$('syncLeave').onclick = () => {
+  if (!confirm('Отключить этот телефон от общего склада? Продукты останутся на телефоне, но перестанут синхронизироваться.')) return;
+  sync = { code: null, version: 0, lastSync: 0, error: null };
+  saveSync();
+  renderSync();
+};
+
+if (location.hash.startsWith('#join=')) {
+  $('syncJoinCode').value = cleanCode(location.hash.slice(6));
+  history.replaceState(null, '', location.pathname);
+  document.querySelector('[data-page=settings]').click();
+}
 
 // ---------- scanner ----------
 
@@ -489,7 +714,11 @@ $('scanBtn').onclick = () => startScan(code => {
 // ---------- start ----------
 
 render();
+renderSync();
+syncNow();
 setInterval(render, 60 * 60 * 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+setInterval(() => { if (!document.hidden) syncNow(); }, 30 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); syncNow(); } });
+window.addEventListener('online', syncNow);
 navigator.storage?.persist?.().catch(() => {});
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});

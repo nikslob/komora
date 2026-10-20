@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' https://world.openfoodfacts.org; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' https://world.openfoodfacts.org https://komora-sync.SUBDOMAIN.workers.dev; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#143d32">
@@ -52,8 +52,30 @@
     </section>
 
     <section id="settings" class="hidden">
-      <h2>Данные и настройки</h2>
-      <p class="note">Данные хранятся только на этом телефоне, никуда не отправляются. Чтобы перенести их на другой телефон, сделай экспорт и импорт файла.</p>
+      <h2>Общий склад</h2>
+      <div id="syncOff">
+        <p class="note">Один склад и список покупок на два телефона. На одном телефоне создай склад, на втором введи код.</p>
+        <button class="primary" id="syncCreate" style="width:100%">Создать общий склад</button>
+        <p class="note" style="margin-top:16px">Уже есть код со второго телефона?</p>
+        <div class="toolbar" style="margin-top:0">
+          <input id="syncJoinCode" placeholder="xxxx-xxxx-xxxx-…" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button class="secondary" id="syncJoin">Подключиться</button>
+        </div>
+      </div>
+      <div id="syncOn" class="hidden">
+        <p class="note">Этот телефон подключён к общему складу. Код для второго телефона:</p>
+        <div class="synccode" id="syncCode"></div>
+        <p class="note" id="syncStatus"></p>
+        <div class="tools">
+          <button class="secondary" id="syncShare">Отправить код</button>
+          <button class="ghost" id="syncNow">Обновить сейчас</button>
+          <button class="ghost dangerbtn" id="syncLeave">Отключиться</button>
+        </div>
+        <p class="note">Код — это ключ от склада: кто его знает, тот видит и меняет продукты. Отправляй только своим.</p>
+      </div>
+
+      <h2 style="margin-top:32px">Данные и настройки</h2>
+      <p class="note">Без общего склада данные хранятся только на этом телефоне. Экспорт — резервная копия в файл.</p>
       <div class="tools">
         <button class="secondary" id="export">↓ Экспорт данных</button>
         <button class="secondary" id="import">↑ Импорт данных</button>

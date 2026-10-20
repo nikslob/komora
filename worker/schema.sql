@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS households (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);

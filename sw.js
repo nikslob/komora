@@ -1,5 +1,5 @@
 // Bump on every release so old caches get dropped
-const CACHE = 'komora-v0.3';
+const CACHE = 'komora-v0.4';
 const FILES = [
   './', './index.html', './app.js', './styles.css', './manifest.webmanifest',
   './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',

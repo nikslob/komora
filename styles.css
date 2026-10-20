@@ -104,3 +104,4 @@ video { width: 100%; border-radius: 12px; background: black; max-height: 300px; 
   .shell { padding-top: 30px; }
   .bottom { max-width: 460px; left: 50%; transform: translateX(-50%); border-radius: 20px 20px 0 0; }
 }
+.synccode { font: 600 18px ui-monospace, SFMono-Regular, Menlo, monospace; background: white; border: 1px solid #dce4dc; border-radius: 12px; padding: 14px; letter-spacing: .5px; overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
