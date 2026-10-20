@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '0.2';
+const VERSION = '0.2.1';
 const KEY = 'komora-v1';
 const places = ['Холодильник', 'Морозилка', 'Крупы и шкаф', 'Специи', 'Другое'];
 const units = ['шт', 'г', 'кг', 'мл', 'л', 'уп.'];
