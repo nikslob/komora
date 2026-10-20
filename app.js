@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '0.2.1';
+const VERSION = '0.3';
 const KEY = 'komora-v1';
 const places = ['Холодильник', 'Морозилка', 'Крупы и шкаф', 'Специи', 'Другое'];
 const units = ['шт', 'г', 'кг', 'мл', 'л', 'уп.'];
@@ -138,18 +138,28 @@ function parseQuantity(text) {
   return qty > 0 && unit ? { qty, unit } : null;
 }
 
+// "SEREK WIEJSKI" -> "Serek wiejski"; short caps like "UHT" stay as is
+function unshout(text) {
+  let t = String(text || '').trim();
+  if (t.replace(/[^\p{L}]/gu, '').length >= 4 && t === t.toLocaleUpperCase()) {
+    t = t.toLocaleLowerCase();
+    t = t.charAt(0).toLocaleUpperCase() + t.slice(1);
+  }
+  return t;
+}
+
 async function lookupOpenFoodFacts(code) {
   let ctrl = new AbortController();
   let timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    let url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_uk,product_name_ru,brands,quantity`;
+    let url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_uk,product_name_ru,product_name_pl,product_name_en,brands,quantity`;
     let res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) return null;
     let p = (await res.json()).product;
     if (!p) return null;
-    let name = (p.product_name_uk || p.product_name_ru || p.product_name || '').trim();
+    let name = unshout(p.product_name_uk || p.product_name_ru || p.product_name || p.product_name_pl || p.product_name_en);
     if (!name) return null;
-    let brands = String(p.brands || '').split(',').map(b => b.trim()).filter(Boolean);
+    let brands = String(p.brands || '').split(',').map(unshout).filter(Boolean);
     let lower = name.toLocaleLowerCase();
     if (brands.length && !brands.some(b => lower.includes(b.toLocaleLowerCase()))) {
       name = `${brands.find(b => /[а-яіїєґ]/i.test(b)) || brands[0]} ${name}`;
