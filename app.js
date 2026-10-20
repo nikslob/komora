@@ -3,7 +3,7 @@
 const VERSION = '0.4';
 const KEY = 'komora-v1';
 const SYNC_KEY = 'komora-sync';
-const API = 'https://komora-sync.SUBDOMAIN.workers.dev';
+const API = 'https://komora-sync.komora-sync.workers.dev';
 const places = ['Холодильник', 'Морозилка', 'Крупы и шкаф', 'Специи', 'Другое'];
 const units = ['шт', 'г', 'кг', 'мл', 'л', 'уп.'];
 

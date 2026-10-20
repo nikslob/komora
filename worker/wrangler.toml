@@ -9,4 +9,4 @@ ALLOWED_ORIGINS = "https://nikslob.github.io"
 [[d1_databases]]
 binding = "DB"
 database_name = "komora"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "3f274eee-c02f-415c-b965-7fe5733cdb22"
