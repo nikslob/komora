@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#143d32">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Комора">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Комора — домашний склад</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span>◈</span> Комора</div>
+    <div class="sub">Всё на кухне — под контролем</div>
+  </header>
+
+  <main class="shell">
+    <div class="hero">
+      <div>
+        <h1 id="heading">Мои продукты</h1>
+        <div class="muted" id="subtitle">Ваш домашний склад</div>
+      </div>
+      <button class="primary" id="addBtn">＋ Добавить</button>
+    </div>
+
+    <div id="inventory">
+      <section class="stats" id="stats"></section>
+      <div id="alerts"></div>
+      <nav class="tabs" id="tabs"></nav>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="🔎 Поиск по продуктам">
+        <button class="secondary scanbig" id="scanBtn" title="Сканировать штрихкод">▥ Скан</button>
+      </div>
+      <div id="list"></div>
+    </div>
+
+    <section id="shopping" class="hidden">
+      <div class="toolbar">
+        <input id="shopInput" placeholder="Что нужно купить?" enterkeyhint="done">
+        <button class="primary" id="shopAdd">＋</button>
+      </div>
+      <div id="shopList"></div>
+      <button class="ghost hidden" id="shopClearDone" style="width:100%;margin-top:8px">Убрать купленное</button>
+    </section>
+
+    <section id="settings" class="hidden">
+      <h2>Данные и настройки</h2>
+      <p class="note">Данные хранятся только на этом телефоне, никуда не отправляются. Чтобы перенести их на другой телефон, сделай экспорт и импорт файла.</p>
+      <div class="tools">
+        <button class="secondary" id="export">↓ Экспорт данных</button>
+        <button class="secondary" id="import">↑ Импорт данных</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+        <button class="ghost dangerbtn" id="clear">Очистить склад</button>
+      </div>
+      <p class="note">Названия по штрихкоду ищутся в открытой базе Open Food Facts (туда уходит только сам номер штрихкода). Если товара там нет, впиши название один раз — Комора запомнит его для этого кода.</p>
+      <p class="note" id="version"></p>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button data-page="inventory" class="on"><i>▦</i>Продукты</button>
+    <button data-page="shopping"><i>☷</i>Покупки</button>
+    <button data-page="settings"><i>⚙</i>Настройки</button>
+  </nav>
+
+  <dialog id="editor">
+    <form class="modal" id="form">
+      <h2 id="formTitle">Добавить продукт</h2>
+      <div class="formgrid">
+        <label class="wide">Штрихкод
+          <div class="barcoderow">
+            <input name="barcode" inputmode="numeric" placeholder="Можно ввести вручную" autocomplete="off">
+            <button type="button" class="ghost" id="formScan" title="Сканировать">▥</button>
+          </div>
+          <div class="lookup" id="lookupStatus"></div>
+        </label>
+        <label class="wide">Название<input name="name" required maxlength="90" placeholder="Например, паприка"></label>
+        <label>Количество<input name="qty" type="number" inputmode="decimal" min="0" step="any" required value="1"></label>
+        <label>Единица
+          <select name="unit"><option>шт</option><option>г</option><option>кг</option><option>мл</option><option>л</option><option>уп.</option></select>
+        </label>
+        <label>Где хранится
+          <select name="place"><option>Холодильник</option><option>Морозилка</option><option>Крупы и шкаф</option><option>Специи</option><option>Другое</option></select>
+        </label>
+        <label>Годен до<input name="expiry" type="date"></label>
+      </div>
+      <div class="modalactions">
+        <button type="button" class="ghost" id="cancel">Отмена</button>
+        <button class="primary" type="submit">Сохранить</button>
+      </div>
+      <button type="button" class="ghost dangerbtn hidden" id="deleteItem" style="width:100%;margin-top:10px">Удалить продукт</button>
+    </form>
+  </dialog>
+
+  <dialog id="consumeDialog">
+    <div class="modal">
+      <h2>Использовать продукт</h2>
+      <p id="consumeInfo"></p>
+      <label>Сколько использовали?<input id="consumeQty" type="number" inputmode="decimal" min="0.001" step="any" value="1"></label>
+      <div class="modalactions">
+        <button class="ghost" id="consumeAll">Всё</button>
+        <button class="ghost" id="consumeCancel">Отмена</button>
+        <button class="primary" id="consumeSave">Списать</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="foundDialog">
+    <div class="modal">
+      <h2 id="foundTitle"></h2>
+      <p class="muted" id="foundInfo"></p>
+      <div class="stack">
+        <button class="primary" id="foundBought">＋ Купил ещё</button>
+        <button class="secondary" id="foundUse">− Использовал</button>
+        <button class="ghost" id="foundEdit">Изменить</button>
+        <button class="ghost" id="foundClose">Отмена</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="scanner">
+    <div class="modal">
+      <h2>Сканер штрихкода</h2>
+      <div class="viewfinder"><video id="camera" autoplay muted playsinline></video></div>
+      <p class="note" id="scanStatus">Наведи камеру на штрихкод.</p>
+      <button class="secondary" id="scanClose" style="width:100%">Закрыть</button>
+    </div>
+  </dialog>
+
+  <script src="vendor/barcode-detector.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
